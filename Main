@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*- # Add this line for better UTF-8 support
+
 import logging
 import requests
 from requests.auth import HTTPBasicAuth
@@ -12,16 +14,19 @@ import os
 import time
 from datetime import datetime, timedelta
 
-TOKEN = "8074321892:AAF6glPFFhVkWdS_FWVBYaMN4MkE8jsEjmY"
+# --- Constants and Config ---
+# TOKEN = "YOUR_TELEGRAM_BOT_TOKEN" # Replace with your actual token
+TOKEN = "8074321892:AAF6glPFFhVkWdS_FWVBYaMN4MkE8jsEjmY" # Your provided token
 
 KISMET_URL = "http://localhost:2501"
-KISMET_USERNAME = "kali" 
-KISMET_PASSWORD = "kali" 
+KISMET_USERNAME = "kali"
+KISMET_PASSWORD = "kali"
 
 
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 FONT_NAME = "DejaVu"
 
+# --- Logging Setup ---
 logging.basicConfig(
     filename="bot.log",
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -29,10 +34,57 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# --- Global Variables ---
 ssid_history = {}
 
+# --- Alert Descriptions Dictionary ---
+ALERT_DESCRIPTIONS = {
+    "ADHOCCONFLICT": "Xung đột mạng Ad-Hoc: Phát hiện thiết bị cố gắng tham gia/tạo mạng ad-hoc khi không được phép hoặc gây xung đột.",
+    "ADVCRYPTCHANGE": "Thay đổi mã hóa nâng cao: Phát hiện thay đổi phương thức mã hóa trên AP/mạng. Có thể là tấn công (downgrade) hoặc cấu hình sai.",
+    "AIRJACKSSID": "SSID của AirJack: Phát hiện AP có thể giả mạo sử dụng SSID liên quan đến công cụ tấn công AirJack.",
+    "APSPOOF": "Giả mạo AP: Phát hiện thiết bị giả mạo địa chỉ MAC của AP hợp pháp để lừa người dùng kết nối.",
+    "BCASTDISCON": "Ngắt kết nối Broadcast: Phát hiện lượng lớn khung tin ngắt kết nối/deauthentication gửi đến địa chỉ broadcast (tấn công DoS).",
+    "BCOM11KCHAN": "Kênh Broadcom 802.11k: Cảnh báo liên quan đến xử lý kênh 802.11k trên thiết bị Broadcom, có thể chỉ ra hoạt động không mong muốn.",
+    "BEACONRATE": "Tốc độ Beacon: Tốc độ phát beacon từ AP bất thường (quá nhanh/chậm). Có thể do AP giả mạo/lỗi.",
+    "BSSTIMESTAMP": "Dấu thời gian BSS: Dấu thời gian (timestamp) trong beacon không nhất quán hoặc reset bất thường. Có thể do AP giả mạo/tấn công replay.",
+    "CHANCHANGE": "Thay đổi kênh: AP thay đổi kênh hoạt động bất thường/thường xuyên. Có thể gây gián đoạn hoặc là dấu hiệu sự cố.",
+    "CRYPTODROP": "Mất gói mã hóa: Phát hiện mất gói dữ liệu mã hóa giữa AP và client. Có thể do nhiễu hoặc tấn công.",
+    "DEAUTHFLOOD": "Tấn công Deauthentication Flood: Phát hiện lượng lớn khung deauthentication gửi đến client/AP (tấn công DoS).",
+    "DEAUTHCODEINVALID": "Mã Deauthentication không hợp lệ: Khung deauthentication chứa mã lý do (reason code) không hợp lệ. Thường do công cụ tấn công/lỗi.",
+    "DHCPNAMECHANGE": "Thay đổi tên máy DHCP: Client thay đổi tên máy (hostname) giữa các lần yêu cầu DHCP. Có thể bình thường hoặc bất thường.",
+    "DHCPOSCHANGE": "Thay đổi hệ điều hành DHCP: Client báo cáo HĐH khác nhau trong các yêu cầu DHCP. Có thể do thay thế thiết bị/cài lại/giả mạo.",
+    "DHCPCLIENTID": "ID Client DHCP: Bất thường liên quan đến định danh client trong yêu cầu DHCP (dùng chung ID, thay đổi liên tục).",
+    "DHCPCONFLICT": "Xung đột DHCP: Phát hiện xung đột địa chỉ IP do DHCP cấp. Có thể do cấu hình sai/nhiều máy chủ DHCP/lỗi máy chủ.",
+    "DISASSOCTRAFFIC": "Lưu lượng Disassociation: Phát hiện lượng lớn khung disassociation. Nếu bất thường, có thể là tấn công DoS.",
+    "DISCONCODEINVALID": "Mã Disconnect không hợp lệ: Khung disassociation chứa mã lý do (reason code) không hợp lệ. Tương tự DEAUTHCODEINVALID.",
+    "DOT11D": "802.11d: Phát hiện vấn đề với thông tin vùng (regulatory domain) theo chuẩn 802.11d. Có thể do AP giả mạo/cấu hình sai.",
+    "FORMATSTRING": "Chuỗi định dạng: Phát hiện chuỗi ký tự giống định dạng chuỗi (format string) trong gói tin (như SSID). Có thể là tấn công khai thác lỗ hổng.",
+    "KARMAOUI": "OUI KARMA: Phát hiện MAC có OUI liên quan đến công cụ tấn công KARMA (kỹ thuật Evil Twin nâng cao).",
+    "LUCENTTEST": "Lucent Test (Cũ): Cảnh báo cũ liên quan đến thử nghiệm/lỗ hổng trên thiết bị Lucent/Orinoco cũ. Thường bị vô hiệu hóa.",
+    "LONGSSID": "SSID dài: AP quảng bá SSID dài hơn giới hạn (32 ký tự). Có thể là tấn công tràn bộ đệm (buffer overflow) client.",
+    "MSFBCOMSSID": "SSID Broadcom Metasploit: Phát hiện SSID dùng bởi module Metasploit nhắm vào lỗ hổng thiết bị Broadcom.",
+    "MSFDLINKRATE": "Tốc độ D-Link Metasploit: Phát hiện tốc độ dữ liệu bất thường liên quan đến tấn công Metasploit nhắm vào D-Link.",
+    "MSFNETGEARBEACON": "Beacon Netgear Metasploit: Phát hiện beacon giống như tạo bởi module Metasploit nhắm vào Netgear.",
+    "MALFORMMGMT": "Khung quản lý lỗi định dạng: Khung quản lý Wi-Fi (beacon, probe, auth,...) có cấu trúc không đúng chuẩn/lỗi. Do lỗi phần mềm/nhiễu/tấn công.",
+    "NETSTUMBLER": "NetStumbler (Cũ): Phát hiện hoạt động của công cụ quét mạng NetStumbler. Ít giá trị hiện nay. Thường bị vô hiệu hóa.",
+    "NOCLIENTMFP": "Client không hỗ trợ MFP: Client kết nối mạng yêu cầu MFP (802.11w) nhưng không hỗ trợ, làm giảm bảo mật (khung quản lý không được bảo vệ).",
+    "NONCEDEGRADE": "Giảm chất lượng Nonce: Sử dụng nonce (số ngẫu nhiên dùng một lần trong WPA/WPA2) yếu/dễ đoán. Làm suy yếu mã hóa. (Có thể bị vô hiệu hóa).",
+    "NONCEREUSE": "Tái sử dụng Nonce: Tái sử dụng nonce trong các phiên mã hóa khác nhau. Lỗ hổng nghiêm trọng, cho phép giải mã/giả mạo gói tin. (Có thể bị vô hiệu hóa).",
+    "NULLPROBERESP": "Phản hồi Probe rỗng: AP gửi phản hồi probe không chứa SSID. Hành vi không chuẩn, có thể là mạng ẩn hoặc AP bất thường.",
+    "OVERPOWERED": "Công suất quá mạnh: Thiết bị Wi-Fi phát sóng với công suất vượt mức cho phép. Gây nhiễu hoặc là dấu hiệu thiết bị giả mạo. (Có thể bị vô hiệu hóa).",
+    "PROBECHAN": "Kênh Probe: Client gửi probe request trên kênh không mong đợi (không phép/không hoạt động). Có thể là quét mạng chủ động.",
+    "QCOMEXTENDED": "Mở rộng Qualcomm: Phát hiện IE (Information Elements) độc quyền/mở rộng của Qualcomm bất thường. Có thể liên quan đến lỗ hổng. (Có thể bị vô hiệu hóa).",
+    "RSNLOOP": "Vòng lặp RSN: Lặp lại bất thường trong quá trình bắt tay 4 bước WPA/WPA2. Có thể là tấn công DoS hoặc lỗi tương thích.",
+    "RTL8195VD1406": "Lỗ hổng Realtek RTL8195 VD1406: Dấu hiệu khai thác lỗ hổng bảo mật cụ thể trên thiết bị dùng chip Realtek RTL8195.",
+    "RTLWIFIP2P": "Wi-Fi Direct Realtek P2P: Hoạt động Wi-Fi Direct (P2P) bất thường hoặc khai thác lỗ hổng P2P trên thiết bị Realtek.",
+    "VDOO202027301": "Lỗ hổng VDOO 2020-27301: Dấu hiệu khai thác lỗ hổng CVE-2020-27301 (tra cứu CVE để biết chi tiết, thường là IoT/camera).",
+    "VDOO202027302": "Lỗ hổng VDOO 2020-27302: Tương tự, nhưng liên quan đến CVE-2020-27302.",
+    "WPSBRUTE": "Tấn công Brute-force WPS: Dấu hiệu tấn công brute-force dò mã PIN WPS (có lỗ hổng nghiêm trọng).",
+    "WMMOVERFLOW": "Tràn bộ đệm WMM: Khung tin WMM (ưu tiên đa phương tiện) có kích thước/cấu trúc bất thường. Có thể là khai thác lỗ hổng tràn bộ đệm.",
+    "WMMTSPEC": "TSPEC WMM: Khung TSPEC (yêu cầu QoS) trong WMM chứa giá trị không hợp lệ/bất thường. Có thể là tấn công DoS hoặc khai thác lỗ hổng.",
+}
 
-
+# --- Font Registration ---
 def register_font():
     """Đăng ký font chữ nếu tồn tại."""
     if os.path.exists(FONT_PATH):
@@ -47,20 +99,24 @@ def register_font():
         logger.warning(f"Không tìm thấy file font tại: {FONT_PATH}. Chức năng PDF có thể bị ảnh hưởng.")
         return False
 
-
 FONT_REGISTERED = register_font()
 
-# 📡 Hàm lấy dữ liệu từ Kismet API
+# --- Kismet API Fetch Function ---
 def fetch_kismet_data(endpoint):
     try:
         url = f"{KISMET_URL}{endpoint}"
-        response = requests.get(url, auth=HTTPBasicAuth(KISMET_USERNAME, KISMET_PASSWORD), timeout=15) 
-        response.raise_for_status() #
+        response = requests.get(url, auth=HTTPBasicAuth(KISMET_USERNAME, KISMET_PASSWORD), timeout=15)
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
 
         content_type = response.headers.get("Content-Type", "")
         if "application/json" not in content_type:
             logger.error(f"Kismet endpoint {endpoint} không trả về JSON. Content-Type: {content_type}")
-            return None, f"❌ Dữ liệu trả về từ Kismet không hợp lệ (không phải JSON) cho endpoint: {endpoint}"
+            # Read the response text for better debugging, even if not JSON
+            try:
+                error_details = response.text[:500] # Limit error message size
+            except Exception:
+                error_details = "(Không thể đọc nội dung phản hồi)"
+            return None, f"❌ Dữ liệu trả về từ Kismet không hợp lệ (không phải JSON) cho endpoint: {endpoint}. Nội dung: {error_details}"
 
         return response.json(), None
 
@@ -74,23 +130,34 @@ def fetch_kismet_data(endpoint):
         if e.response.status_code == 401:
             logger.error("Lỗi xác thực Kismet (401).")
             return None, "❌ Lỗi xác thực Kismet (401): Vui lòng kiểm tra Username/Password."
-        logger.error(f"Lỗi HTTP từ Kismet ({e.response.status_code}): {e}")
-        return None, f"❌ Lỗi HTTP từ Kismet ({e.response.status_code}) cho endpoint: {endpoint}."
+        # Log the response body for other HTTP errors if possible
+        error_details = ""
+        try:
+            error_details = e.response.text[:500] # Limit error message size
+        except Exception:
+            error_details = "(Không thể đọc nội dung lỗi)"
+        logger.error(f"Lỗi HTTP từ Kismet ({e.response.status_code}) cho endpoint {endpoint}: {e}. Chi tiết: {error_details}")
+        return None, f"❌ Lỗi HTTP từ Kismet ({e.response.status_code}) cho endpoint: {endpoint}. Chi tiết: {error_details}"
     except requests.exceptions.RequestException as e:
         logger.error(f"Lỗi yêu cầu Kismet không xác định: {e}")
         return None, f"❌ Lỗi yêu cầu Kismet không xác định: {e}"
     except ValueError as e: # Lỗi khi parse JSON
         logger.error(f"Lỗi parse JSON từ Kismet endpoint {endpoint}: {e}")
-        return None, f"❌ Dữ liệu trả về từ Kismet không hợp lệ (lỗi parse JSON) cho endpoint: {endpoint}"
+        # Try to get the raw text that failed parsing
+        raw_text = ""
+        if 'response' in locals() and hasattr(response, 'text'):
+             raw_text = response.text[:500] # Limit raw text size
+        return None, f"❌ Dữ liệu trả về từ Kismet không hợp lệ (lỗi parse JSON) cho endpoint: {endpoint}. Raw data (nếu có): {raw_text}"
 
-# Chia nhỏ tin nhắn nếu vượt quá giới hạn Telegram (4096 ký tự)
+# --- Utility Functions ---
 def split_message(text, chunk_size=4000):
-    if not isinstance(text, str): 
+    """Chia nhỏ tin nhắn nếu vượt quá giới hạn Telegram."""
+    if not isinstance(text, str):
        text = str(text)
     for i in range(0, len(text), chunk_size):
         yield text[i:i + chunk_size]
 
-
+# --- Data Fetching Functions (get_all_ap, get_ap_monitor_data, etc.) ---
 async def get_all_ap():
     """Lấy danh sách APs và định dạng chúng thành list các string."""
     data, error = fetch_kismet_data("/devices/views/phydot11_accesspoints/devices.json")
@@ -107,7 +174,7 @@ async def get_all_ap():
             ssid = ap.get("kismet.device.base.commonname", "Ẩn/Không tên")
             bssid = ap.get("kismet.device.base.macaddr", "Unknown BSSID")
             encryption=ap.get("kismet.device.base.crypt","Unknown_Encryption")
-           
+
             signal_info = ap.get("kismet.common.signal", {})
             signal_dbm = signal_info.get("last_signal_dbm", "N/A")
             channel = ap.get("kismet.phy.dot11.channel", "N/A") # Lấy kênh
@@ -116,7 +183,7 @@ async def get_all_ap():
                 f"📡 **SSID:** `{ssid}`\n"
                 f"🔍 **BSSID:** `{bssid.upper()}`\n"
                 f"🔒 **Bảo mật:** `{encryption}`\n"
-                f"📶 **Kênh:** `{channel}` | **Tín hiệu:** `{signal_dbm} dBm`\n" 
+                f"📶 **Kênh:** `{channel}` | **Tín hiệu:** `{signal_dbm} dBm`\n"
                 f"〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️"
             )
 
@@ -130,15 +197,15 @@ async def get_ap_monitor_data():
 
     if not data or not isinstance(data, list):
          logger.warning("Dữ liệu APs monitor trả về không phải list hoặc rỗng.")
-         return [], None 
+         return [], None
 
     ap_pairs = []
     for ap in data:
         if ap.get("kismet.device.base.type") == "Wi-Fi AP":
             ssid = ap.get("kismet.device.base.commonname", "Unknown_SSID")
             bssid = ap.get("kismet.device.base.macaddr")
-            if bssid: 
-               ap_pairs.append({"ssid": ssid, "bssid": bssid.lower()}) 
+            if bssid:
+               ap_pairs.append({"ssid": ssid, "bssid": bssid.lower()})
 
     return ap_pairs, None
 
@@ -150,7 +217,7 @@ async def monitor_ssid_changes():
     if error:
         return [error] # Trả về lỗi
 
-    if ap_pairs is None: 
+    if ap_pairs is None:
         return ["❌ Không thể lấy dữ liệu AP để giám sát."]
 
     rogue_aps = []
@@ -170,7 +237,7 @@ async def monitor_ssid_changes():
                              f"   SSID Mới: `{current_ssid}`\n"
                              f"   SSIDs Trước đó: `{', '.join(old_ssids)}`")
             logger.warning(f"RAP Phát hiện (SSID Change): BSSID: {bssid}, SSID mới: {current_ssid}, SSIDs cũ: {old_ssids}")
-    return rogue_aps if rogue_aps else [] 
+    return rogue_aps if rogue_aps else []
 
 async def get_alerts(limit=5):
     """Lấy danh sách cảnh báo từ Kismet (giới hạn số lượng)."""
@@ -181,25 +248,34 @@ async def get_alerts(limit=5):
     if not data or not isinstance(data, list):
         return ["✅ Không có cảnh báo nào từ Kismet hoặc dữ liệu không hợp lệ!"]
     try:
-        sorted_alerts = sorted(data, key=lambda x: x.get('kismet.alert.timestamp', 0) or x.get('kismet.alert.sec', 0), reverse=True)
+        # Handle potential None or 0 timestamp values during sorting
+        def get_timestamp(alert):
+            ts = alert.get('kismet.alert.timestamp', 0) or alert.get('kismet.alert.sec', 0)
+            return ts if ts else 0 # Return 0 if both are missing or None/0
+
+        sorted_alerts = sorted(data, key=get_timestamp, reverse=True)
     except Exception as e:
         logger.warning(f"Không thể sắp xếp cảnh báo theo timestamp: {e}. Sử dụng thứ tự gốc.")
         sorted_alerts = data
 
-    latest_alerts = sorted_alerts[:limit] 
+    latest_alerts = sorted_alerts[:limit]
     alert_list = []
     for alert in latest_alerts:
         header = alert.get("kismet.alert.header", "N/A")
         text = alert.get("kismet.alert.text", "Không có mô tả")
 
         # Lấy timestamp và định dạng
-        timestamp_sec = alert.get('kismet.alert.timestamp') or alert.get('kismet.alert.sec', 0)
+        timestamp_sec = alert.get('kismet.alert.timestamp') or alert.get('kismet.alert.sec')
         if timestamp_sec:
             try:
+                # Handle potential large timestamp values (milliseconds vs seconds)
+                if timestamp_sec > time.time() * 2: # Basic check if it looks like ms
+                    timestamp_sec /= 1000
                 dt_object = datetime.fromtimestamp(timestamp_sec)
                 timestamp_str = dt_object.strftime("%Y-%m-%d %H:%M:%S")
-            except Exception:
-                timestamp_str = str(timestamp_sec) 
+            except (ValueError, OSError, TypeError) as ts_err:
+                 logger.warning(f"Lỗi định dạng timestamp '{timestamp_sec}': {ts_err}")
+                 timestamp_str = f"Invalid ({timestamp_sec})"
         else:
             timestamp_str = "N/A"
 
@@ -218,54 +294,69 @@ async def get_clients_by_ap(ssid_filter):
     if aps_error:
         return [f"❌ Lỗi khi tìm BSSID cho SSID '{ssid_filter}': {aps_error}"]
     if not aps_data or not isinstance(aps_data, list):
-        return [f"ℹ️ Không tìm thấy AP nào có SSID khớp '{ssid_filter}'."]
+        return [f"ℹ️ Không tìm thấy AP nào hoặc dữ liệu AP không hợp lệ để tìm client cho SSID '{ssid_filter}'."]
 
     found_aps = []
     for ap in aps_data:
         if ap.get("kismet.device.base.type") == "Wi-Fi AP":
              ap_ssid = ap.get("kismet.device.base.commonname", "")
+             # Case-insensitive and strip whitespace comparison
              if ap_ssid.strip().lower() == ssid_filter.strip().lower():
                   bssid = ap.get("kismet.device.base.macaddr")
                   if bssid:
-                      found_aps.append(bssid.lower()) 
+                      found_aps.append(bssid.lower())
 
     if not found_aps:
         return [f"✅ Không tìm thấy AP nào đang hoạt động với SSID: **{ssid_filter}**"]
     if len(found_aps) > 1:
-        logger.warning(f"Tìm thấy nhiều AP ({len(found_aps)}) với SSID '{ssid_filter}'. Sử dụng BSSID đầu tiên: {found_aps[0]}")
+        logger.warning(f"Tìm thấy nhiều AP ({len(found_aps)}) với SSID '{ssid_filter}'. Sử dụng BSSID đầu tiên: {found_aps[0].upper()}")
+        # Optionally inform the user:
+        # await update.message.reply_text(f"ℹ️ Tìm thấy nhiều AP khớp. Hiển thị client cho BSSID: `{found_aps[0].upper()}`", parse_mode="Markdown")
 
     target_bssid = found_aps[0] # Lấy BSSID đầu tiên tìm được
     logger.info(f"Tìm thấy BSSID {target_bssid.upper()} cho SSID '{ssid_filter}'")
 
     clients_list = []
+    # Endpoint preference: by-mac first, then phy-IEEE802.11 view
     all_dev_data, dev_error = fetch_kismet_data("/devices/by-mac/*/device.json")
-    if dev_error:
-         # Thử endpoint khác nếu endpoint trên không hoạt động
-         logger.warning("Không thể dùng /devices/by-mac/*/device.json, thử /devices/views/phy-IEEE802.11/devices.json")
+    if dev_error or not isinstance(all_dev_data, list): # Check for error or invalid data type
+         logger.warning(f"Không thể dùng /devices/by-mac/*/device.json (Lỗi: {dev_error}), thử /devices/views/phy-IEEE802.11/devices.json")
          all_dev_data, dev_error = fetch_kismet_data("/devices/views/phy-IEEE802.11/devices.json")
          if dev_error:
               return [f"❌ Lỗi khi lấy danh sách thiết bị: {dev_error}"]
 
-    if not all_dev_data or not isinstance(all_dev_data, list): 
-        return ["ℹ️ Không nhận được dữ liệu thiết bị hợp lệ từ Kismet."]
+    if not all_dev_data or not isinstance(all_dev_data, list):
+        return [f"ℹ️ Không nhận được dữ liệu thiết bị hợp lệ từ Kismet để tìm client cho SSID '{ssid_filter}'."]
 
     for device in all_dev_data:
-        if device.get("kismet.device.base.type") == "Wi-Fi Client":
-            last_bssid = (device.get("dot11.device", {}).get("dot11.device.last_bssid") or
-                          device.get("kismet.wireless.client. BSSID")) # Thêm trường dự phòng nếu cần
+        # Check if it's a Wi-Fi Client
+        if device.get("kismet.device.base.type") != "Wi-Fi Client":
+            continue
 
-            if last_bssid and last_bssid.lower() == target_bssid:
-                mac_address = device.get("kismet.device.base.macaddr", "Unknown MAC")
-                signal_info = device.get("kismet.common.signal", {})
-                signal_dbm = signal_info.get("last_signal_dbm", "N/A")
-                clients_list.append(f"📱 **MAC:** `{mac_address.upper()}` | **Tín hiệu:** `{signal_dbm} dBm`")
+        # Find the BSSID it's associated with (handle different Kismet versions/structures)
+        last_bssid = None
+        dot11_device_data = device.get("dot11.device")
+        if dot11_device_data and isinstance(dot11_device_data, dict):
+            last_bssid = dot11_device_data.get("dot11.device.last_bssid")
+
+        # Fallback field (adjust if needed based on your Kismet version)
+        if not last_bssid:
+             last_bssid = device.get("kismet.wireless.client. BSSID") # Check field name carefully
+
+        # Compare BSSIDs (case-insensitive)
+        if last_bssid and last_bssid.lower() == target_bssid:
+            mac_address = device.get("kismet.device.base.macaddr", "Unknown MAC")
+            signal_info = device.get("kismet.common.signal", {})
+            signal_dbm = signal_info.get("last_signal_dbm", "N/A")
+            clients_list.append(f"📱 **MAC:** `{mac_address.upper()}` | **Tín hiệu:** `{signal_dbm} dBm`")
 
     logger.info(f"Tìm thấy {len(clients_list)} client cho BSSID {target_bssid.upper()}")
     if not clients_list:
          return [f"✅ Không tìm thấy client nào đang kết nối vào AP **{ssid_filter}** (BSSID: `{target_bssid.upper()}`)"]
     else:
-        return [f"👥 Client đang kết nối vào **{ssid_filter}** (BSSID: `{target_bssid.upper()}`):"] + clients_list
-
+        # Prepend the header message to the list
+        header = f"👥 Client đang kết nối vào **{ssid_filter}** (BSSID: `{target_bssid.upper()}`):"
+        return [header] + clients_list
 
 async def get_summary_data():
     """Lấy dữ liệu tóm tắt từ Kismet (APs, Clients, Alerts)."""
@@ -274,69 +365,85 @@ async def get_summary_data():
         "client_count": 0,
         "new_alert_count": 0,
         "strongest_ap": None,
-        "max_ap_signal": -1000,
+        "max_ap_signal": -1000, # Initialize with a very low value
         "strongest_client": None,
-        "max_client_signal": -1000,
+        "max_client_signal": -1000, # Initialize with a very low value
         "errors": []
     }
     start_time = time.time()
     logger.info("Bắt đầu lấy dữ liệu tóm tắt...")
 
+    # --- Fetch AP Data ---
     ap_data, ap_error = fetch_kismet_data("/devices/views/phydot11_accesspoints/devices.json")
     if ap_error:
         summary["errors"].append(f"Lỗi lấy AP: {ap_error}")
+        logger.error(f"Summary Error (AP): {ap_error}")
     elif ap_data and isinstance(ap_data, list):
         for ap in ap_data:
             if ap.get("kismet.device.base.type") == "Wi-Fi AP":
                 summary["ap_count"] += 1
                 try:
                     signal_dbm = ap.get("kismet.common.signal", {}).get("last_signal_dbm")
-                    # Chỉ cập nhật strongest_ap nếu tín hiệu hợp lệ và mạnh hơn
-                    if signal_dbm is not None and isinstance(signal_dbm, (int, float)) and signal_dbm > summary["max_ap_signal"]:
-                        summary["max_ap_signal"] = signal_dbm
-                        summary["strongest_ap"] = {
-                            "ssid": ap.get("kismet.device.base.commonname", "N/A"),
-                            "bssid": ap.get("kismet.device.base.macaddr", "N/A")
-                        }
+                    if signal_dbm is not None and isinstance(signal_dbm, (int, float)):
+                       if signal_dbm > summary["max_ap_signal"]:
+                            summary["max_ap_signal"] = signal_dbm
+                            summary["strongest_ap"] = {
+                                "ssid": ap.get("kismet.device.base.commonname", "N/A"),
+                                "bssid": ap.get("kismet.device.base.macaddr", "N/A")
+                            }
                 except Exception as e:
                     logger.warning(f"Summary: Không thể xử lý tín hiệu AP {ap.get('kismet.device.base.macaddr')}: {e}")
     else:
          logger.warning("Summary: Dữ liệu AP không hợp lệ hoặc rỗng.")
 
 
-    client_data, client_error = fetch_kismet_data("/devices/views/phy-IEEE802.11/devices.json") 
+    # --- Fetch Client Data (Using a more reliable view) ---
+    client_data, client_error = fetch_kismet_data("/devices/views/phy-IEEE802.11/devices.json")
     if client_error:
         summary["errors"].append(f"Lỗi lấy Client: {client_error}")
+        logger.error(f"Summary Error (Client): {client_error}")
     elif client_data and isinstance(client_data, list):
          for device in client_data:
              if device.get("kismet.device.base.type") == "Wi-Fi Client":
                 summary["client_count"] += 1
                 try:
                     signal_dbm = device.get("kismet.common.signal", {}).get("last_signal_dbm")
-                    if signal_dbm is not None and isinstance(signal_dbm, (int, float)) and signal_dbm > summary["max_client_signal"]:
-                        summary["max_client_signal"] = signal_dbm
-                        summary["strongest_client"] = {
-                            "mac": device.get("kismet.device.base.macaddr", "N/A")
-                        }
+                    if signal_dbm is not None and isinstance(signal_dbm, (int, float)):
+                        if signal_dbm > summary["max_client_signal"]:
+                            summary["max_client_signal"] = signal_dbm
+                            summary["strongest_client"] = {
+                                "mac": device.get("kismet.device.base.macaddr", "N/A")
+                            }
                 except Exception as e:
                      logger.warning(f"Summary: Không thể xử lý tín hiệu Client {device.get('kismet.device.base.macaddr')}: {e}")
     else:
         logger.warning("Summary: Dữ liệu client không hợp lệ hoặc rỗng.")
 
 
+    # --- Fetch Alert Data ---
     alert_data, alert_error = fetch_kismet_data("/alerts/all_alerts.json")
     if alert_error:
         summary["errors"].append(f"Lỗi lấy Cảnh báo: {alert_error}")
+        logger.error(f"Summary Error (Alert): {alert_error}")
     elif alert_data and isinstance(alert_data, list):
-        cutoff_timestamp = (datetime.now() - timedelta(hours=24)).timestamp()
+        # Calculate timestamp 24 hours ago
+        try:
+            cutoff_timestamp = (datetime.now() - timedelta(hours=24)).timestamp()
+        except Exception as time_err:
+            logger.error(f"Summary: Lỗi tính toán cutoff timestamp: {time_err}")
+            cutoff_timestamp = 0 # Default to counting all if error
 
         for alert in alert_data:
             try:
+                 # Prefer 'timestamp', fallback to 'sec'
                  alert_timestamp = alert.get('kismet.alert.timestamp') or alert.get('kismet.alert.sec')
                  if alert_timestamp and isinstance(alert_timestamp, (int, float)):
+                     # Handle potential millisecond timestamps
+                     if alert_timestamp > time.time() * 2: # Basic check
+                         alert_timestamp /= 1000
                      if alert_timestamp >= cutoff_timestamp:
                          summary["new_alert_count"] += 1
-            except Exception as e:
+            except (ValueError, TypeError, OSError) as e: # Catch potential conversion errors
                  logger.warning(f"Summary: Không thể xử lý timestamp cảnh báo {alert.get('alert_key', 'N/A')}: {e}")
     else:
         logger.warning("Summary: Dữ liệu cảnh báo không hợp lệ hoặc rỗng.")
@@ -355,7 +462,8 @@ async def start(update: Update, context: CallbackContext):
         [KeyboardButton("/ap"), KeyboardButton("/summary")],
         [KeyboardButton("/alert"), KeyboardButton("/monitor")],
         [KeyboardButton("/appdf"), KeyboardButton("/help")],
-        [KeyboardButton("Tìm Client (nhập /client SSID)")]
+        [KeyboardButton("Tìm Client (nhập /client SSID)")],
+        [KeyboardButton("Giải thích Alert (nhập /type CODE)")], # Add button hint
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
     await update.message.reply_text(
@@ -371,28 +479,30 @@ async def help_command(update: Update, context: CallbackContext):
         "📌 **Danh sách lệnh có sẵn:**\n\n"
         "`/start` - Hiển thị tin nhắn chào mừng và bàn phím lệnh.\n\n"
         "`/help` - Hiển thị danh sách lệnh này.\n\n"
-        "`/ap` - 📡 Lấy danh sách Access Point (APs) phát hiện được từ Kismet (bao gồm SSID, BSSID, Bảo mật, Kênh, Tín hiệu).\n\n"
-        "`/summary` - 📊 Xem báo cáo tóm tắt nhanh về Kismet (số lượng APs, Clients, cảnh báo mới, thiết bị mạnh nhất).\n\n"
+        "`/ap` - 📡 Lấy danh sách Access Point (APs) phát hiện được.\n\n"
+        "`/summary` - 📊 Xem báo cáo tóm tắt nhanh Kismet.\n\n"
         "`/alert` - 🔔 Xem 5 cảnh báo Kismet gần nhất.\n\n"
-        "`/client <SSID>` - 👥 Liệt kê các client đang kết nối vào một AP có SSID cụ thể (ví dụ: `/client MyWifi`).\n\n"
-        "`/monitor` - 🚨 Kiểm tra và báo cáo nếu có AP nào đã biết (theo BSSID) thay đổi SSID.\n\n"
-        "`/appdf` - 📄 Xuất danh sách Access Point hiện tại thành file PDF (yêu cầu font chữ được cài đặt đúng).\n"
+        "`/client <SSID>` - 👥 Liệt kê client kết nối vào AP có SSID cụ thể (vd: `/client MyWifi`).\n\n"
+        "`/monitor` - 🚨 Kiểm tra AP đã biết thay đổi SSID (RAP).\n\n"
+        "`/appdf` - 📄 Xuất danh sách AP hiện tại thành file PDF.\n\n"
+        "`/type <ALERT_CODE>` - ℹ️ Giải thích ý nghĩa của một mã cảnh báo Kismet cụ thể (vd: `/type APSPOOF`).\n" # Added /type
         "\n_Lưu ý: Một số lệnh có thể mất vài giây để xử lý._"
     )
+    # Send without the reply keyboard unless explicitly requested
     await update.message.reply_text(help_text, parse_mode="Markdown", reply_markup=None)
 
 
 async def ap_command(update: Update, context: CallbackContext):
     """Lấy và gửi danh sách APs."""
     await update.message.reply_text("📡 Đang lấy danh sách Access Points từ Kismet...")
-    result = await get_all_ap() 
+    result = await get_all_ap()
     if result and isinstance(result, list) and result[0].startswith("❌"):
-         await update.message.reply_text(result[0])
+         await update.message.reply_text(result[0]) # Send error message
     elif not result:
          await update.message.reply_text("ℹ️ Không tìm thấy AP nào hoặc không có dữ liệu.")
     else:
         result_text = "\n\n".join(result)
-        if not result_text.strip(): 
+        if not result_text.strip():
             await update.message.reply_text("✅ Không tìm thấy AP nào!")
         else:
             for part in split_message(result_text):
@@ -401,17 +511,23 @@ async def ap_command(update: Update, context: CallbackContext):
 async def appdf_command(update: Update, context: CallbackContext):
     """Xuất danh sách APs thành file PDF."""
     if not FONT_REGISTERED:
-        await update.message.reply_text("❌ Lỗi: Không thể tạo PDF do font chữ chưa được đăng ký hoặc không tìm thấy. Vui lòng kiểm tra cấu hình `FONT_PATH` trong code và cài đặt font chữ.")
+        await update.message.reply_text("❌ Lỗi: Không thể tạo PDF do font chữ chưa được đăng ký hoặc không tìm thấy. Vui lòng kiểm tra cấu hình `FONT_PATH` và cài đặt font chữ.")
         return
 
     await update.message.reply_text("📄 Đang tạo file PDF danh sách Access Points...")
 
-    ap_list_formatted = await get_all_ap() 
+    ap_list_formatted = await get_all_ap()
 
+    # Handle error case from get_all_ap()
     if not ap_list_formatted or (isinstance(ap_list_formatted, list) and ap_list_formatted[0].startswith("❌")):
         error_msg = ap_list_formatted[0] if ap_list_formatted else "⚠️ Không có dữ liệu AP để xuất PDF."
         await update.message.reply_text(error_msg)
         return
+    # Handle case where get_all_ap returns the "No APs found" message
+    if isinstance(ap_list_formatted, list) and "Không tìm thấy AP nào" in ap_list_formatted[0]:
+         await update.message.reply_text("✅ Không có AP nào để xuất ra PDF.")
+         return
+
 
     pdf_filename = f"kismet_aps_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
 
@@ -423,60 +539,64 @@ async def appdf_command(update: Update, context: CallbackContext):
         current_y = height - margin
 
         # --- Header ---
-        c.setFont(FONT_NAME, 18)
-        c.drawCentredString(width / 2, current_y, "Báo cáo Access Points - Kismet")
-        current_y -= 30
+        c.setFont(FONT_NAME, 16) # Slightly smaller header
+        c.drawCentredString(width / 2.0, current_y, "Báo cáo Access Points - Kismet")
+        current_y -= 25
         c.setFont(FONT_NAME, 10)
         c.drawString(margin, current_y, f"Ngày tạo: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        current_y -= 25
-        c.line(margin, current_y, width - margin, current_y) 
         current_y -= 20
+        c.line(margin, current_y, width - margin, current_y)
+        current_y -= 15 # Space after line
 
         # --- Content ---
         textobject = c.beginText(margin, current_y)
-        textobject.setFont(FONT_NAME, 9) # Giảm cỡ chữ cho nội dung
-        line_height = 12 # Chiều cao mỗi dòng text
+        textobject.setFont(FONT_NAME, 9) # Smaller font for content
+        line_height = 11 # Adjust line height for smaller font
+
+        # Function to add text lines and handle page breaks
+        def add_lines_to_pdf(text_lines):
+            nonlocal textobject, current_y # Allow modifying outer scope variables
+            required_height = len(text_lines) * line_height + 5 # Estimate height needed + spacing
+            if textobject.getY() - required_height < margin:
+                c.drawText(textobject) # Draw existing text
+                c.showPage() # New page
+                # Optional: Redraw header on new page
+                c.setFont(FONT_NAME, 10)
+                c.drawString(margin, height - margin + 15, f"Báo cáo Access Points (tiếp theo)")
+                c.line(margin, height - margin + 5, width - margin, height - margin + 5)
+                current_y = height - margin - 20
+                textobject = c.beginText(margin, current_y) # Start new text object
+                textobject.setFont(FONT_NAME, 9)
+
+            # Add the actual lines
+            for line in text_lines:
+                 # Basic cleaning for PDF output
+                 clean_line = line.replace("📡 **", "SSID: ").replace("🔍 **", "BSSID: ").replace("🔒 **", "Bảo mật: ").replace("📶 **", "Kênh/Tín hiệu: ")
+                 clean_line = clean_line.replace("`", "").replace("**", "") # Remove markdown
+                 if "〰️〰️〰️" in clean_line or "----" in clean_line:
+                      # Draw a separator line within the text object if possible, or just add space
+                      textobject.moveCursor(0, 3) # Add small space before
+                      textobject.textLine("-" * 80) # Draw a simple line
+                      textobject.moveCursor(0, 3) # Add small space after
+                 else:
+                     textobject.textLine(clean_line)
+            textobject.moveCursor(0, 5) # Add a small gap between entries
+
 
         for ap_entry in ap_list_formatted:
             lines = ap_entry.strip().split('\n')
-            entry_height_estimate = len(lines) * line_height + 10 # Ước tính chiều cao của entry + khoảng cách
-
-            # Kiểm tra sang trang
-            if textobject.getY() - entry_height_estimate < margin:
-                c.drawText(textobject) # Vẽ text hiện tại trước khi sang trang
-                c.showPage() # Tạo trang mới
-                # Vẽ lại header trang mới (tùy chọn)
-                c.setFont(FONT_NAME, 10)
-                c.drawString(margin, height - margin + 10, f"Ngày tạo: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (tiếp theo)")
-                c.line(margin, height-margin, width - margin, height-margin)
-                current_y = height - margin - 20
-                textobject = c.beginText(margin, current_y) # Bắt đầu text object mới
-                textobject.setFont(FONT_NAME, 9)
-
-            # Vẽ từng dòng của entry
-            for line in lines:
-                 # Xử lý icon (đơn giản hóa, không dùng icon phức tạp trong PDF trừ khi nhúng ảnh)
-                 clean_line = line.replace("📡 **", "SSID: ").replace("🔍 **", "BSSID: ").replace("🔒 **", "Bảo mật: ").replace("📶 **", "Kênh/Tín hiệu:")
-                 clean_line = clean_line.replace("`", "").replace("**", "") # Xóa markdown
-                 if "〰️〰️〰️" in clean_line or "----" in clean_line:
-                     textobject.moveCursor(0, 5) # Thêm khoảng trống trước dấu phân cách
-                     textobject.textLine("-" * 70) # Vẽ đường kẻ ngang ngắn
-                     textobject.moveCursor(0, 5) # Thêm khoảng trống sau dấu phân cách
-                 else:
-                     textobject.textLine(clean_line)
-
-            # Không cần cập nhật current_y thủ công, textobject.getY() sẽ tự động cập nhật
+            add_lines_to_pdf(lines)
 
 
-        c.drawText(textobject) # Vẽ phần text còn lại
-        c.save() # Lưu file PDF
+        c.drawText(textobject) # Draw any remaining text
+        c.save() # Save file PDF
 
-        # Gửi file PDF lên Telegram
+        # --- Send PDF ---
         try:
             with open(pdf_filename, "rb") as pdf_file:
                 await update.message.reply_document(
                     document=InputFile(pdf_file, filename=pdf_filename),
-                    caption=f"Danh sách Access Points được tạo vào lúc {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}"
+                    caption=f"Danh sách Access Points ({len(ap_list_formatted)} APs) được tạo lúc {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}"
                 )
             logger.info(f"Đã gửi thành công file PDF: {pdf_filename}")
         except Exception as send_err:
@@ -486,9 +606,13 @@ async def appdf_command(update: Update, context: CallbackContext):
     except Exception as e:
         logger.error(f"Lỗi nghiêm trọng khi tạo PDF: {e}", exc_info=True) # Log traceback
         await update.message.reply_text(f"❌ Lỗi không mong muốn khi tạo PDF: {e}")
+        if 'c' in locals() and c: # Try to close canvas if it exists
+             try: c.save()
+             except: pass
+
 
     finally:
-        # Xóa file PDF sau khi gửi (hoặc nếu có lỗi)
+        # Clean up the PDF file
         if os.path.exists(pdf_filename):
             try:
                 os.remove(pdf_filename)
@@ -498,7 +622,7 @@ async def appdf_command(update: Update, context: CallbackContext):
 
 async def alert_command(update: Update, context: CallbackContext):
     """Lấy và gửi danh sách cảnh báo."""
-    await update.message.reply_text("🔔 Đang kiểm tra danh sách cảnh báo Kismet...")
+    await update.message.reply_text("🔔 Đang kiểm tra 5 cảnh báo Kismet gần nhất...")
     result = await get_alerts(limit=5) # Lấy 5 cảnh báo gần nhất
     if result and isinstance(result, list) and result[0].startswith("❌"):
         await update.message.reply_text(result[0])
@@ -506,7 +630,7 @@ async def alert_command(update: Update, context: CallbackContext):
          await update.message.reply_text("ℹ️ Không có cảnh báo nào.")
     else:
         result_text = "\n\n".join(result)
-        if not result_text.strip():
+        if not result_text.strip() or "Không có cảnh báo nào" in result_text :
             await update.message.reply_text("✅ Không có cảnh báo nào trong 5 cảnh báo gần nhất.")
         else:
             for part in split_message(result_text):
@@ -523,17 +647,28 @@ async def client_command(update: Update, context: CallbackContext):
         )
         return
 
+    # Join args to handle SSIDs with spaces (even without quotes, though quotes are better)
     ssid_filter = " ".join(context.args).strip()
+    if not ssid_filter:
+         await update.message.reply_text("⚠️ Bạn chưa nhập SSID.", parse_mode="Markdown")
+         return
+
     await update.message.reply_text(f"👥 Đang tìm client kết nối vào AP có SSID: **{ssid_filter}**...", parse_mode="Markdown")
 
-    result = await get_clients_by_ap(ssid_filter) # result là list string
+    result = await get_clients_by_ap(ssid_filter) # result is a list of strings
 
+    # Check for error message from the function
     if result and isinstance(result, list) and result[0].startswith("❌"):
         await update.message.reply_text(result[0], parse_mode="Markdown")
+    # Check for "not found" messages from the function
+    elif result and isinstance(result, list) and ("Không tìm thấy AP nào" in result[0] or "Không tìm thấy client nào" in result[0] or "Không nhận được dữ liệu" in result[0]):
+         await update.message.reply_text(result[0], parse_mode="Markdown") # Send the specific "not found" message
     elif not result:
+         # Generic fallback if function returns empty for some reason
          await update.message.reply_text(f"ℹ️ Không tìm thấy thông tin client cho SSID: **{ssid_filter}**.", parse_mode="Markdown")
     else:
-        result_text = "\n".join(result) # Nối bằng \n thay vì \n\n
+        # Join with single newline as the header is already included in the list
+        result_text = "\n".join(result)
         for part in split_message(result_text):
             await update.message.reply_text(part, parse_mode="Markdown")
 
@@ -541,12 +676,13 @@ async def client_command(update: Update, context: CallbackContext):
 async def monitor_command(update: Update, context: CallbackContext):
     """Kiểm tra sự thay đổi SSID và báo cáo RAP."""
     await update.message.reply_text("🚨 Đang kiểm tra thay đổi SSID (RAP Detection)...")
-    rogue_aps = await monitor_ssid_changes() # Trả về list các string hoặc list lỗi
+    rogue_aps = await monitor_ssid_changes() # Returns list of strings or list with error
 
     if not rogue_aps:
         await update.message.reply_text("✅ Không phát hiện BSSID nào thay đổi SSID bất thường.")
+    # Check if the list contains an error message
     elif isinstance(rogue_aps, list) and rogue_aps[0].startswith("❌"):
-         await update.message.reply_text(f"Lỗi khi giám sát: {rogue_aps[0]}")
+         await update.message.reply_text(f"{rogue_aps[0]}") # Display the error
     else:
         response = "⚠️ **Cảnh báo thay đổi SSID:**\n\n" + "\n\n".join(rogue_aps)
         for part in split_message(response):
@@ -558,13 +694,15 @@ async def summary_command(update: Update, context: CallbackContext):
 
     summary_data = await get_summary_data()
 
-    # --- Xử lý lỗi nếu có ---
+    # --- Format Error Message (if any) ---
+    error_message = ""
     if summary_data["errors"]:
-        error_message = "⚠️ Đã xảy ra lỗi khi lấy dữ liệu tóm tắt:\n- " + "\n- ".join(summary_data["errors"])
-        # Vẫn tiếp tục hiển thị phần dữ liệu lấy được nếu có
-        await update.message.reply_text(error_message)
+        error_message = "⚠️ *Đã xảy ra lỗi khi lấy một phần dữ liệu tóm tắt:*\n- " + "\n- ".join(summary_data["errors"]) + "\n\n_(Kết quả bên dưới có thể không đầy đủ)_"
+        # Log the errors clearly
+        logger.error(f"Lỗi trong summary_command: {summary_data['errors']}")
 
-    # --- Format Tin nhắn Kết quả ---
+
+    # --- Format Result Message ---
     summary_text = "📊 **Báo cáo Tóm tắt Kismet** 📊\n"
     summary_text += "------------------------------------\n"
     summary_text += f"📡 **Tổng số Access Points:** `{summary_data['ap_count']}`\n"
@@ -572,7 +710,7 @@ async def summary_command(update: Update, context: CallbackContext):
     summary_text += f"🔔 **Cảnh báo mới (24h):** `{summary_data['new_alert_count']}`\n"
     summary_text += "------------------------------------\n\n"
 
-    if summary_data["strongest_ap"]:
+    if summary_data["strongest_ap"] and summary_data['max_ap_signal'] > -1000: # Check if data exists
         ap = summary_data['strongest_ap']
         signal = summary_data['max_ap_signal']
         summary_text += (f"👑 **AP Tín hiệu Mạnh nhất:**\n"
@@ -580,37 +718,78 @@ async def summary_command(update: Update, context: CallbackContext):
                          f"   BSSID: `{ap['bssid'].upper()}`\n"
                          f"   Tín hiệu: `{signal} dBm`\n\n")
     else:
-        summary_text += "👑 **AP Tín hiệu Mạnh nhất:** `(Không có dữ liệu)`\n\n"
+        summary_text += "👑 **AP Tín hiệu Mạnh nhất:** `(Không có dữ liệu hoặc không tìm thấy AP)`\n\n"
 
-    if summary_data["strongest_client"]:
+    if summary_data["strongest_client"] and summary_data['max_client_signal'] > -1000: # Check if data exists
         client = summary_data['strongest_client']
         signal = summary_data['max_client_signal']
         summary_text += (f"💪 **Client Tín hiệu Mạnh nhất:**\n"
                          f"   MAC: `{client['mac'].upper()}`\n"
                          f"   Tín hiệu: `{signal} dBm`\n")
     else:
-        summary_text += "💪 **Client Tín hiệu Mạnh nhất:** `(Không có dữ liệu)`\n"
+        summary_text += "💪 **Client Tín hiệu Mạnh nhất:** `(Không có dữ liệu hoặc không tìm thấy client)`\n"
 
-    # --- Gửi Tin nhắn ---
-    # Gửi không có bàn phím reply cho lệnh này
+    # --- Send Message(s) ---
+    # Send error message first if it exists
+    if error_message:
+        await update.message.reply_text(error_message, parse_mode="Markdown", reply_markup=None)
+        # Maybe add a small delay if needed
+        # await asyncio.sleep(0.5)
+
+    # Send the main summary
     await update.message.reply_text(summary_text, parse_mode="Markdown", reply_markup=None)
 
 
-# --- Error Handler ---
+# --- NEW: Type Command Handler ---
+async def type_command(update: Update, context: CallbackContext):
+    """Giải thích ý nghĩa của một mã cảnh báo Kismet."""
+    if not context.args:
+        await update.message.reply_text(
+            "⚠️ Vui lòng nhập mã cảnh báo Kismet cần giải thích.\n"
+            "Ví dụ: `/type DEAUTHFLOOD`",
+            parse_mode="Markdown"
+        )
+        return
 
+    alert_code = context.args[0].upper().strip() # Get first arg, convert to uppercase, remove whitespace
+
+    # Lookup description in the dictionary (case-insensitive due to .upper())
+    description = ALERT_DESCRIPTIONS.get(alert_code)
+
+    if description:
+        response_text = f"ℹ️ **{alert_code}:**\n\n{description}"
+        await update.message.reply_text(response_text, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(
+            f"❌ Không tìm thấy giải thích cho mã cảnh báo: `{alert_code}`.\n"
+            "Vui lòng kiểm tra lại mã hoặc đảm bảo đó là mã cảnh báo Wi-Fi hợp lệ từ Kismet.",
+             parse_mode="Markdown"
+             )
+
+# --- Error Handler ---
 async def error_handler(update: object, context: CallbackContext):
     """Log lỗi và thông báo cho người dùng."""
+    # Log the error before anything else
     logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
 
-    # Cố gắng thông báo lỗi cho người dùng nếu có thể
+    # Attempt to notify the user, checking if 'update' is valid and has a message
     if isinstance(update, Update) and update.effective_message:
         try:
-            await update.effective_message.reply_text("❌ Rất tiếc, đã có lỗi xảy ra trong quá trình xử lý yêu cầu của bạn. Vui lòng thử lại sau.")
+            # Escape any special characters in the error message for Markdown
+            # error_text = html.escape(str(context.error)) # Or use html escape if preferred
+            # You might want a simpler user message instead of the raw error
+            user_message = "❌ Rất tiếc, đã có lỗi xảy ra trong quá trình xử lý yêu cầu của bạn. Vui lòng thử lại sau hoặc liên hệ quản trị viên nếu lỗi tiếp diễn."
+            # Consider adding a reference ID or timestamp for admins?
+            # error_id = int(time.time())
+            # logger.error(f"Error ID {error_id}: {context.error}", exc_info=context.error)
+            # user_message += f" (Ref: {error_id})"
+
+            await update.effective_message.reply_text(user_message)
         except Exception as e:
-            logger.error(f"Không thể gửi thông báo lỗi cho người dùng: {e}")
+            # Log the failure to notify the user too
+            logger.error(f"Could not send error message to user after an exception: {e}")
 
 # --- Setup and Run ---
-
 def setup_handlers(application):
     """Đăng ký tất cả các command handler."""
     handlers = [
@@ -622,27 +801,60 @@ def setup_handlers(application):
         CommandHandler("client", client_command),
         CommandHandler("monitor", monitor_command),
         CommandHandler("appdf", appdf_command),
-         # Thêm MessageHandler để bắt các lệnh không hợp lệ hoặc tin nhắn thường
-         # Trả về help nếu người dùng gửi tin nhắn không phải lệnh
-         MessageHandler(filters.TEXT & ~filters.COMMAND, help_command)
+        CommandHandler("type", type_command), # Add the new handler
+         # MessageHandler to catch non-command text - perhaps suggest /help
+         MessageHandler(filters.TEXT & ~filters.COMMAND, help_command) # Redirect non-commands to help
     ]
     for handler in handlers:
         application.add_handler(handler)
 
-    # Đăng ký error handler
+    # Register the error handler
     application.add_error_handler(error_handler)
-    logger.info("Đã đăng ký các handlers.")
+    logger.info("Đã đăng ký các command và error handlers.")
 
 def main():
     """Khởi chạy bot Telegram."""
-    logger.info("Bắt đầu khởi tạo bot...")
+    logger.info("--- Bot Starting Up ---")
+    if not TOKEN or "YOUR_TELEGRAM_BOT_TOKEN" in TOKEN:
+         logger.critical("FATAL: Telegram Bot Token is missing or invalid!")
+         print("FATAL: Telegram Bot Token is missing or invalid! Please set the TOKEN variable.", flush=True)
+         return # Stop execution
+
+    # Basic Kismet connection check (optional but helpful)
+    logger.info(f"Kiểm tra kết nối Kismet tại {KISMET_URL}...")
+    try:
+        # Use a simple endpoint like /system/status.json
+        status_url = f"{KISMET_URL}/system/status.json"
+        response = requests.get(status_url, auth=HTTPBasicAuth(KISMET_USERNAME, KISMET_PASSWORD), timeout=5)
+        response.raise_for_status()
+        logger.info(f"Kết nối Kismet thành công (Status code: {response.status_code}).")
+    except requests.exceptions.ConnectionError:
+        logger.error(f"Lỗi Startup: Không thể kết nối tới Kismet tại {KISMET_URL}.")
+        print(f"Lỗi Startup: Không thể kết nối tới Kismet tại {KISMET_URL}. Bot sẽ vẫn khởi chạy nhưng các lệnh Kismet sẽ thất bại.", flush=True)
+    except requests.exceptions.HTTPError as http_err:
+         if http_err.response.status_code == 401:
+              logger.error("Lỗi Startup: Sai thông tin xác thực Kismet (Username/Password).")
+              print("Lỗi Startup: Sai thông tin xác thực Kismet. Bot sẽ vẫn khởi chạy nhưng các lệnh Kismet sẽ thất bại.", flush=True)
+         else:
+              logger.error(f"Lỗi Startup: Lỗi HTTP khi kết nối Kismet: {http_err}")
+              print(f"Lỗi Startup: Lỗi HTTP khi kết nối Kismet: {http_err}. Bot sẽ vẫn khởi chạy nhưng các lệnh Kismet sẽ thất bại.", flush=True)
+    except requests.exceptions.Timeout:
+        logger.error("Lỗi Startup: Timeout khi kết nối Kismet.")
+        print("Lỗi Startup: Timeout khi kết nối Kismet. Bot sẽ vẫn khởi chạy nhưng các lệnh Kismet sẽ thất bại.", flush=True)
+    except Exception as conn_err:
+        logger.error(f"Lỗi Startup: Lỗi không xác định khi kiểm tra kết nối Kismet: {conn_err}")
+        print(f"Lỗi Startup: Lỗi không xác định khi kiểm tra kết nối Kismet: {conn_err}. Bot sẽ vẫn khởi chạy nhưng các lệnh Kismet sẽ thất bại.", flush=True)
+
+
     try:
         application = Application.builder().token(TOKEN).build()
         setup_handlers(application)
-        logger.info("Bot đang bắt đầu chạy...")
+        logger.info("Bot đang bắt đầu chạy và lắng nghe updates...")
+        print("Bot is running...", flush=True)
         application.run_polling()
     except Exception as e:
-        logger.critical(f"Lỗi nghiêm trọng khi khởi tạo hoặc chạy bot: {e}", exc_info=True)
+        logger.critical(f"Lỗi nghiêm trọng khi khởi tạo hoặc chạy application.run_polling(): {e}", exc_info=True)
+        print(f"CRITICAL ERROR: Bot failed to start or run. Check bot.log for details. Error: {e}", flush=True)
 
 if __name__ == "__main__":
     main()
